@@ -5,7 +5,8 @@
 //    from an Airspy HF+
 //    on port 1234
 //
-#define VERSION "v.1.2.118"
+#define VERSION "v.1.2.119"
+//   v.1.2.119 2021-03-11  ON5HB Bas Heijermans - settings changed for websdr.org servers - testing with HF Discovery
 //   v.1.2.118 2020-12-31  1pm barry@medoff.com
 //   v.1.2.117 2020-09-02  rhn
 //   v.1.2.112 2019-07-30  0am barry@medoff.com
@@ -30,9 +31,11 @@
 #define SAMPLE_BITS     ( 8)    // default to match rtl_tcp
 // #define SAMPLE_BITS  (16)    // default to match rsp_tcp
 // #define SAMPLE_BITS  (32)    // HF+ capable of float32 IQ data
-#define GAIN8           (64.0)  // default gain
+#define GAIN8           (2048.0)  // default gain (default:64.0)
 #define PORT            (1234)  // default port
-#define RING_BUFFER_ALLOCATION  (2L * 8L * 1024L * 1024L)  // 16MB
+// #define RING_BUFFER_ALLOCATION  (2L * 8L * 1024L * 1024L)  // 16MB
+#define RING_BUFFER_ALLOCATION  (8L * 8L * 1024L * 1024L) // 128MB as memory is no issue on websdr.org system at ON5HB
+#define BUFFER_SIZE ( 64*1024 ) //can be very big too small ticking starts
 
 #define _POSIX_C_SOURCE 200112L
 #include <stdio.h>
@@ -75,7 +78,7 @@ int             sendErrorFlag   =  0;
 int             sampleBits      =  SAMPLE_BITS;
 int         numSampleRates      =  1;
 static long int totalSamples    =  0;
-long        sampRate            =  768000;
+long        sampRate            =  384000;
 long        previousSRate       = -1;
 float       gain0               =  GAIN8;
 int        gClientSocketID      = -1;
@@ -97,7 +100,7 @@ int		sendblockcount  =  0;
 int 		threads_running =  0;
 
 char UsageString[]
-    = "Usage:    [-p listen port (default: 1234)]\n          [-b 16]";
+    = "Usage:    [-p listen port (default: 1234)]\n          [-b 16bit samples]";
 
 int main(int argc, char *argv[]) {
 
@@ -204,7 +207,7 @@ int main(int argc, char *argv[]) {
         printf(" \n\n");
     }
 
-    int sampRate = 768000;
+//    int sampRate = 768000;
     n = airspyhf_set_samplerate(device, sampRate);
     printf("set rate status = %d %d\n", sampRate, n);
     previousSRate = sampRate;
@@ -411,7 +414,7 @@ void send_delay(int n, int rate)
 
 void *tcp_send_handler(void *param)
 {
-    int sz0   =     1408;                      // MTU size ?
+    int sz0   =    BUFFER_SIZE;     // changed Bas ON5HB
     int pad   =    32768 * 2;
     printf("send thread %d running 2 \n", thread_counter);
     while (stop_send_thread == 0) {
@@ -692,6 +695,7 @@ int usb_rcv_callback(airspyhf_transfer_t *context)
             // should be 128.0 or 2X larger, so 1-bit missing
             float rnd0A = rand_float_co();
             float rnd0B = rand_float_co();
+
             for (int i=0; i<2*n; i++) {
                 float x;
                 Float32_t x1;          // for debug hex print
@@ -711,15 +715,17 @@ int usb_rcv_callback(airspyhf_transfer_t *context)
                 } else {               // round Q
                     rnd0B = rnd1;      // save for next iteration
                 }
-            }
+              }
+
+/*
             // previous rounding
-            /*
             for (int i=0; i<2*n; i++) {
                 float x = g8 * p[i];
                 int   k = (int)roundf(x);
                 tmpBuf[i] = k + 128;  // 8-bit unsigned DC offset
             }
-            */
+            //end
+*/
             dataBuffer = (uint8_t *)(&tmpBuf[0]);
             sz = 2 * n;
         } else if (sampleBits == 16) {

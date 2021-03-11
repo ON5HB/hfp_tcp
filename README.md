@@ -99,4 +99,9 @@ To run the hfp\_tcp application, connect an Airspy HF+ radio to the system via 
 
 By default, for compatibility with the rtl_tcp protocol, hfp_tcp streams data consisting of 8-bit samples.  In order to take advantage of the additional resolution of the analog to digital converter in the Airspy HF+ radio, hfp_tcp can also stream data consisting of 16-bit samples.  To stream 16-bit samples to SDR Receiver, start hfp_tcp with the -b 16 flag and in SDR Receiver, on the Settings tab, select Sampling and set Sample Size to 16-bits.  
 
-Readme.v18
+# ON5HB Bas Heijermans - changes
+Settings have to be made within the source file, then compiled.
+Changed buffers, gains and ringbuffer to make it work with websdr.org servers.
+I'm testing with an Airspy HF Discovery.
+
+Readme.v19
