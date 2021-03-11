@@ -1,7 +1,6 @@
 # hfp\_tcp
 
->Stream signals from an Airspy HF+ radio to **[SDR Receiver](https://itunes.apple.com/us/app/sdr-receiver/id1289939888?ls=1&mt=8)**, a software defined radio receiver for iOS, or to any application that supports the rtl_tcp protocol.
-
+This fork is only for streaming to websdr.org servers, I do not test any orther clients. Bas - ON5HB.
 
 ## Download and Build hfp_tcp
 The hfp\_tcp application is a streaming server that implements the rtl\_tcp protocol for an Airspy HF+ radio.  It enables any application that supports the rtl_tcp protocol to stream data over a network from an Airspy HF+ radio. These directions explain how to build and run the hfp\_tcp application on a Mac or Raspberry Pi.
@@ -99,7 +98,7 @@ To run the hfp\_tcp application, connect an Airspy HF+ radio to the system via 
 
 By default, for compatibility with the rtl_tcp protocol, hfp_tcp streams data consisting of 8-bit samples.  In order to take advantage of the additional resolution of the analog to digital converter in the Airspy HF+ radio, hfp_tcp can also stream data consisting of 16-bit samples.  To stream 16-bit samples to SDR Receiver, start hfp_tcp with the -b 16 flag and in SDR Receiver, on the Settings tab, select Sampling and set Sample Size to 16-bits.  
 
-# ON5HB Bas Heijermans - changes
+## ON5HB Bas Heijermans - changes
 Settings have to be made within the source file, then compiled.
 Changed buffers, gains and ringbuffer to make it work with websdr.org servers.
 I'm testing with an Airspy HF Discovery.
