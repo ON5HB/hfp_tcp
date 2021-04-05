@@ -5,8 +5,8 @@
 //    from an Airspy HF+
 //    on port 1234
 //
-#define VERSION "v.1.2.119"
-//   v.1.2.119 2021-03-11  ON5HB Bas Heijermans - settings changed for websdr.org servers - testing with HF Discovery
+#define VERSION "v.1.2.130"
+//   v.1.2.130 2021-03-11  ON5HB Bas Heijermans - settings changed for websdr.org servers - testing with HF Discovery
 //   v.1.2.118 2020-12-31  1pm barry@medoff.com
 //   v.1.2.117 2020-09-02  rhn
 //   v.1.2.112 2019-07-30  0am barry@medoff.com
@@ -30,11 +30,10 @@
 #define SOCKET_READ_TIMEOUT_SEC ( 10.0 * 60.0 )
 #define SAMPLE_BITS     ( 8)    // default to match rtl_tcp
 // #define SAMPLE_BITS  (16)    // default to match rsp_tcp
-// #define SAMPLE_BITS  (32)    // HF+ capable of float32 IQ data
-#define GAIN8           (2048.0)  // default gain (default:64.0)
+//#define SAMPLE_BITS  (32)    // HF+ capable of float32 IQ data
+#define GAIN8           (1024.0)  // default gain (default:64.0)
 #define PORT            (1234)  // default port
-// #define RING_BUFFER_ALLOCATION  (2L * 8L * 1024L * 1024L)  // 16MB
-#define RING_BUFFER_ALLOCATION  (8L * 8L * 1024L * 1024L) // 128MB as memory is no issue on websdr.org system at ON5HB
+#define RING_BUFFER_ALLOCATION  (2L * 8L * 1024L * 1024L) // 16MB as memory is no issue on websdr.org system at ON5HB
 #define BUFFER_SIZE ( 64*1024 ) //can be very big too small ticking starts
 
 #define _POSIX_C_SOURCE 200112L
@@ -87,6 +86,10 @@ uint8_t	   *ring_buffer_ptr     =  NULL;
 int		decimateFlag	=  1;
 int		decimateCntr	=  0;
 int		filterFlag	=  0;
+int             agc             =  2; // 0-off / 1-low / 2 high threshold
+int             attenuator      =  0; // Possible values: 0..8 Range: 0..48 dB Attenuation with 6 dB steps
+int             preamp          =  1; // 0 or 1: 1 to activate LNA (alias PreAmp): 1 = +6 dB gain - compensated in digital 
+
 void 	iir_fbc(float *s, int n, int order);
 void 	init_iir();
 
@@ -99,8 +102,27 @@ float        sMin               =  0.0;
 int		sendblockcount  =  0;
 int 		threads_running =  0;
 
-char UsageString[]
-    = "Usage:    [-p listen port (default: 1234)]\n          [-b 16bit samples]";
+static int ignore_f_command = 0;
+static int ignore_s_command = 0;
+static int verbose = 0;
+
+void usage(void)
+{
+        printf("HF Discovery TCP for AirspyHF receivers - modified by Bas ON5HB for websdr.org "
+#ifdef SERVER_VERSION
+                "VERSION "VERSION
+#endif
+                "\n\n Usage:\n"
+                "\t-p Listen port (default: 1234)\n"
+                "\t-r Gain (default: 1024 / value 0-4096? not tested)\n"
+		"\t-G Automatic-Gain-Control (default: 2 / 0-off / 1-low /  2-high threshold)\n"
+                "\t-A Attenuator (default: 0 / values 0-8 each step is -6dB)\n"
+                "\t-L LNA* (default: on / on is +6dB)\n"
+                "\t-v Verbose output* (default: disabled - not working yet)\n\n"
+                "\t* Marked options are switches they toggle on/off\n"
+                 );
+        exit(1);
+}
 
 int main(int argc, char *argv[]) {
 
@@ -108,45 +130,50 @@ int main(int argc, char *argv[]) {
     char client_addr_ipv6[100];
     int portno     =  PORT;     //
     char *ipaddr =  NULL;       // "127.0.0.1"
-    int n;
+    int n, opt;
 
-    if (argc > 1) {
-    if ((argc % 2) != 1) {
-            printf("%s\n", UsageString);
-            exit(0);
-        }
-        for (int arg=3; arg<=argc; arg+=2) {
-        if (strcmp(argv[arg-2], "-p")==0) {
-                portno = atoi(argv[arg-1]);
-                if (portno == 0) {
-                    printf("invalid port number entry %s\n", argv[arg-1]);
-                    exit(0);
+struct sigaction sigact, sigign;
+
+        while ((opt = getopt(argc, argv, "A:G:p:r:Lv")) != -1) {
+                switch (opt) {
+                case 'A':
+                        attenuator = atoi(optarg);
+                        break;
+		case 'G':
+                        agc = atoi(optarg);
+                        break;
+
+                case 'p':
+                        portno = atoi(optarg);
+                        break;
+                case 'r':
+                        gain0 = atof(optarg);
+                        break;
+                case 'L':
+                        preamp = 0;
+                        break;
+
+                case 'v':
+                        verbose = 1;
+                        break;
+                default:
+                        usage();
+                        break;
                 }
-            } else if (strcmp(argv[arg-2], "-b")==0) {
-                if (strcmp(argv[arg-1],"16")==0) {
-                    sampleBits = 16;
-                } else if (strcmp(argv[arg-1],"8")==0) {
-                    sampleBits =  8;
-                } else {
-                    printf("%s\n", UsageString);
-                    exit(0);
-                }
-            } else if (strcmp(argv[arg-2], "-a")==0) {
-        ipaddr = argv[arg-1];        // unused
-            } else {
-                printf("%s\n", UsageString);
-                exit(0);
-            }
-        }
+
     }
 
-    printf("\nhfp_tcp Version %s\n\n", VERSION);
+    printf("\nHF Discovery TCP for AirspyHF receivers - modified by Bas ON5HB for websdr.org %s\n\n", VERSION);
 
     ring_buffer_ptr = (uint8_t *)malloc(RING_BUFFER_ALLOCATION + 4);
     if (ring_buffer_ptr == NULL) { exit(-1); }
     bzero(ring_buffer_ptr, RING_BUFFER_ALLOCATION + 2);
 
-    printf("Serving %d-bit samples on port %d\n", sampleBits, portno);
+    printf("Serving samples on port %d\n", portno);
+    printf("AGC set to 0-disabled / 1-low / 2-high threshold: %d\n", agc);
+    printf("RF gain setting: %f\n", gain0);
+    printf("Preamp set to: +%d dB\n", preamp*6);
+    printf("Attennuation set to: -%d dB\n", attenuator*6);
 
     uint64_t serials[4] = { 0L,0L,0L,0L };
     int count = 2;
@@ -209,7 +236,7 @@ int main(int argc, char *argv[]) {
 
 //    int sampRate = 768000;
     n = airspyhf_set_samplerate(device, sampRate);
-    printf("set rate status = %d %d\n", sampRate, n);
+    printf("set rate status = %ld %d\n", sampRate, n);
     previousSRate = sampRate;
     long int f0 = 162450000;
     n = airspyhf_set_freq(device, f0);
@@ -245,6 +272,38 @@ int main(int argc, char *argv[]) {
 
     listen(listen_sockfd, 5);
     fprintf(stdout, "listening for socket connection \n");
+
+	// set AGC settings. ON5HB
+
+        if (agc == 1) {
+                        airspyhf_set_hf_agc(device, 1);
+                        airspyhf_set_hf_agc_threshold(device, 0); //low AGC
+        }
+
+        else if (agc == 2) {
+                        airspyhf_set_hf_agc(device, 1);
+                        airspyhf_set_hf_agc_threshold(device, 1); //high AGC
+        }
+        else {
+                        airspyhf_set_hf_agc(device, 0); //agc off
+        }
+	// set LNA - Preamp
+        if (preamp == 1) {
+                        airspyhf_set_hf_lna(device, 1);
+        }
+        else {
+                        airspyhf_set_hf_lna(device, 0); //lna off
+        }
+
+        // set Attenuator
+        if (attenuator > 0 && attenuator < 9) {
+                        airspyhf_set_hf_att(device, attenuator);
+        }
+        else {
+                        airspyhf_set_hf_att(device, 0); //attenuator off
+        }
+
+
 
     while (1) {
 
@@ -361,8 +420,10 @@ int ring_write(uint8_t *from_ptr, int amount)
     // insert memory barrier here
     //
     ring_wr_index = w_index;	 // update lock free input info
-// fprintf(stdout, "into ring %d\n", amount); // yyy yyy
-// fflush(stdout);
+
+	//		fprintf(stdout, "into ring %d\n", amount); // yyy yyy
+	//	fflush(stdout);
+
     int m = ring_data_available();
     if (m > ring_buffer_size/2) { wrap = 1; }
     return(wrap);
@@ -430,8 +491,8 @@ void *tcp_send_handler(void *param)
                 k = send(send_sockfd, tmpBuf, sz, MSG_NOSIGNAL);
 #endif
                 if (k <= 0) { sendErrorFlag = -1; }
-// fprintf(stderr, "sent %d\n", k); // yyy yyy
-// fflush(stderr);
+		// fprintf(stderr, "sent %d\n", k); // yyy yyy
+		// fflush(stderr);
                 totalSamples   +=  sz;
                 sendblockcount +=  1;
 	    }
@@ -676,7 +737,7 @@ int usb_rcv_callback(airspyhf_transfer_t *context)
     if (do_exit != 0) { return(-1); }
     //
     if ((sendblockcount % 1000) == 0) {
-        fprintf(stdout,"+"); fflush(stdout);
+	if (verbose) {fprintf(stdout,"+"); fflush(stdout);}
     }
     //
     if (p != NULL && n > 0) {
