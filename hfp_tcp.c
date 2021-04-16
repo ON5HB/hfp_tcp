@@ -5,7 +5,7 @@
 //    from an Airspy HF+
 //    on port 1234
 //
-#define VERSION "v.1.2.130"
+#define VERSION "v.1.2.131"
 //   v.1.2.130 2021-03-11  ON5HB Bas Heijermans - settings changed for websdr.org servers - testing with HF Discovery
 //   v.1.2.118 2020-12-31  1pm barry@medoff.com
 //   v.1.2.117 2020-09-02  rhn
@@ -31,7 +31,7 @@
 #define SAMPLE_BITS     ( 8)    // default to match rtl_tcp
 // #define SAMPLE_BITS  (16)    // default to match rsp_tcp
 //#define SAMPLE_BITS  (32)    // HF+ capable of float32 IQ data
-#define GAIN8           (1024.0)  // default gain (default:64.0)
+#define GAIN8           (8192.0)  // default gain (default:64.0)
 #define PORT            (1234)  // default port
 #define RING_BUFFER_ALLOCATION  (2L * 8L * 1024L * 1024L) // 16MB as memory is no issue on websdr.org system at ON5HB
 #define BUFFER_SIZE ( 64*1024 ) //can be very big too small ticking starts
@@ -69,7 +69,6 @@ void *tcp_send_handler(void *param);
 int usb_rcv_callback(airspyhf_transfer_t *context);
 static void sighandler(int signum);
 
-uint64_t            serialnum   =  0;
 airspyhf_device_t   *device     =  NULL;
 airspyhf_transfer_t context;
 
@@ -114,7 +113,7 @@ void usage(void)
 #endif
                 "\n\n Usage:\n"
                 "\t-p Listen port (default: 1234)\n"
-                "\t-r Gain (default: 1024 / value 0-4096? not tested)\n"
+                "\t-r Gain (default: 8192 / value 0-8192? not tested)\n"
 		"\t-G Automatic-Gain-Control (default: 2 / 0-off / 1-low /  2-high threshold)\n"
                 "\t-A Attenuator (default: 0 / values 0-8 each step is -6dB)\n"
                 "\t-L LNA* (default: on / on is +6dB)\n"
@@ -180,11 +179,6 @@ struct sigaction sigact, sigign;
     n = airspyhf_list_devices(&serials[0], count);
     printf("hf+ devices = %d\n", n);
     if (n == 0L) { exit(-1); }
-    printf("hf+ serial# = ");
-    uint64_t t = serials[0];
-    printf("%" PRIu64 "\n", t);
-    serialnum = t;
-    if (serialnum == 0L) { exit(-1); }
 
     sigact.sa_handler = sighandler;
     sigemptyset(&sigact.sa_mask);
@@ -199,9 +193,9 @@ struct sigaction sigact, sigign;
     sigaction(SIGPIPE, &sigign, NULL);
 #endif
 
-    n = airspyhf_open_sn(&device, serialnum);
-    printf("hf+ open status = %d\n", n);
-    if ((n < 0) || (device == NULL)) { exit(-1); }
+	n = airspyhf_open(&device); // Serial check removed, else it won't start next box.
+	printf("hf+ open status = %d\n", n);
+	if ((n < 0) || (device == NULL)) { exit(-1); }
 
     airspyhf_lib_version_t version;
     airspyhf_lib_version(&version);
@@ -754,6 +748,9 @@ int usb_rcv_callback(airspyhf_transfer_t *context)
             float  g8  =  gain0; // GAIN8;
             // gain is typically 64.0
             // should be 128.0 or 2X larger, so 1-bit missing
+
+/*
+// New rounding
             float rnd0A = rand_float_co();
             float rnd0B = rand_float_co();
 
@@ -778,7 +775,8 @@ int usb_rcv_callback(airspyhf_transfer_t *context)
                 }
               }
 
-/*
+// end new rounding
+*/
             // previous rounding
             for (int i=0; i<2*n; i++) {
                 float x = g8 * p[i];
@@ -786,7 +784,7 @@ int usb_rcv_callback(airspyhf_transfer_t *context)
                 tmpBuf[i] = k + 128;  // 8-bit unsigned DC offset
             }
             //end
-*/
+
             dataBuffer = (uint8_t *)(&tmpBuf[0]);
             sz = 2 * n;
         } else if (sampleBits == 16) {
