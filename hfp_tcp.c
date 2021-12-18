@@ -5,7 +5,7 @@
 //    from an Airspy HF+
 //    on port 1234
 //
-#define VERSION "v.1.2.131"
+#define VERSION "v.1.2.137"
 //   v.1.2.130 2021-03-11  ON5HB Bas Heijermans - settings changed for websdr.org servers - testing with HF Discovery
 //   v.1.2.118 2020-12-31  1pm barry@medoff.com
 //   v.1.2.117 2020-09-02  rhn
@@ -28,10 +28,10 @@
 //
 
 #define SOCKET_READ_TIMEOUT_SEC ( 10.0 * 60.0 )
-#define SAMPLE_BITS     ( 8)    // default to match rtl_tcp
+#define SAMPLE_BITS     (8)    // default to match rtl_tcp
 // #define SAMPLE_BITS  (16)    // default to match rsp_tcp
 //#define SAMPLE_BITS  (32)    // HF+ capable of float32 IQ data
-#define GAIN8           (8192.0)  // default gain (default:64.0)
+#define GAIN8           (2048.0)  // default gain (default: ?)
 #define PORT            (1234)  // default port
 #define RING_BUFFER_ALLOCATION  (2L * 8L * 1024L * 1024L) // 16MB as memory is no issue on websdr.org system at ON5HB
 #define BUFFER_SIZE ( 64*1024 ) //can be very big too small ticking starts
@@ -76,7 +76,7 @@ int             sendErrorFlag   =  0;
 int             sampleBits      =  SAMPLE_BITS;
 int         numSampleRates      =  1;
 static long int totalSamples    =  0;
-long        sampRate            =  384000;
+long        sampRate            =  192000;
 long        previousSRate       = -1;
 float       gain0               =  GAIN8;
 int        gClientSocketID      = -1;
@@ -87,15 +87,13 @@ int		decimateCntr	=  0;
 int		filterFlag	=  0;
 int             agc             =  2; // 0-off / 1-low / 2 high threshold
 int             attenuator      =  0; // Possible values: 0..8 Range: 0..48 dB Attenuation with 6 dB steps
-int             preamp          =  1; // 0 or 1: 1 to activate LNA (alias PreAmp): 1 = +6 dB gain - compensated in digital 
-
-void 	iir_fbc(float *s, int n, int order);
-void 	init_iir();
+int             preamp          =  0; // 0 or 1: 1 to activate LNA (alias PreAmp): 1 = +6 dB gain - compensated in digital 
+int 		dsp 		=  1; /* Enables/Disables the IQ Correction, IF shift and Fine Tuning. */
 
 static int    listen_sockfd;
 struct sigaction    sigact, sigign;
 static volatile int     do_exit =  0;
-float        acc_r              =  0.0;    // accumulated rounding
+float        acc_r              =  0.5;    // accumulated rounding
 float        sMax               =  0.0;    // for debug
 float        sMin               =  0.0;
 int		sendblockcount  =  0;
@@ -104,20 +102,21 @@ int 		threads_running =  0;
 static int ignore_f_command = 0;
 static int ignore_s_command = 0;
 static int verbose = 0;
+static int sample_rounding = 1; // 0=Old rounding - 1=New rounding
 
 void usage(void)
 {
         printf("HF Discovery TCP for AirspyHF receivers - modified by Bas ON5HB for websdr.org "
-#ifdef SERVER_VERSION
-                "VERSION "VERSION
-#endif
+                "version "VERSION
                 "\n\n Usage:\n"
                 "\t-p Listen port (default: 1234)\n"
-                "\t-r Gain (default: 8192 / value 0-8192? not tested)\n"
+                "\t-r Gain (default: 2048 / value 0-8192? not tested)\n"
 		"\t-G Automatic-Gain-Control (default: 2 / 0-off / 1-low /  2-high threshold)\n"
                 "\t-A Attenuator (default: 0 / values 0-8 each step is -6dB)\n"
-                "\t-L LNA* (default: on / on is +6dB)\n"
-                "\t-v Verbose output* (default: disabled - not working yet)\n\n"
+                "\t-L LNA* (default: off / on is +6dB)\n"
+                "\t-x Sample rounding* (default: New methode / Old way)\n\n"
+		"\t-y IQ correction - IF shift - Fine tuning* (default: enabled)\n\n"
+		"\t-v Verbose output* (default: disabled - not working yet)\n\n"
                 "\t* Marked options are switches they toggle on/off\n"
                  );
         exit(1);
@@ -133,7 +132,7 @@ int main(int argc, char *argv[]) {
 
 struct sigaction sigact, sigign;
 
-        while ((opt = getopt(argc, argv, "A:G:p:r:Lv")) != -1) {
+        while ((opt = getopt(argc, argv, "A:G:p:r:Lvxy")) != -1) {
                 switch (opt) {
                 case 'A':
                         attenuator = atoi(optarg);
@@ -149,12 +148,17 @@ struct sigaction sigact, sigign;
                         gain0 = atof(optarg);
                         break;
                 case 'L':
-                        preamp = 0;
+                        preamp = 1;
                         break;
-
                 case 'v':
                         verbose = 1;
                         break;
+		case 'x':
+                        sample_rounding = 0;
+                        break;
+		case 'y':
+			dsp = 0;
+			break;
                 default:
                         usage();
                         break;
@@ -173,6 +177,8 @@ struct sigaction sigact, sigign;
     printf("RF gain setting: %f\n", gain0);
     printf("Preamp set to: +%d dB\n", preamp*6);
     printf("Attennuation set to: -%d dB\n", attenuator*6);
+    printf("Sample rounding set to 1=New / 0=Old : %d dB\n", sample_rounding);
+    printf("DSP set 0-disabled / 1-enabled: %d\n", dsp);
 
     uint64_t serials[4] = { 0L,0L,0L,0L };
     int count = 2;
@@ -297,7 +303,13 @@ struct sigaction sigact, sigign;
                         airspyhf_set_hf_att(device, 0); //attenuator off
         }
 
-
+	// dsp
+	if (dsp == 1) {
+			airspyhf_set_lib_dsp(device, 1); /* Enables the IQ Correction, IF shift and Fine Tuning. */
+	}
+	else {
+			airspyhf_set_lib_dsp(device, 0); /* Disables the IQ Correction, IF shift and Fine Tuning. */
+	}
 
     while (1) {
 
@@ -619,9 +631,14 @@ void *connection_handler()
                           fprintf(stdout,
 			    "decimating 192k sample rate to 48k\n");
 			  decimateFlag = 4;
-			  init_iir();
 			  filterFlag   = 1;
 			  r = 4 * 48000; 	// 192000
+			} else if ((r == 96000) && (numSampleRates >= 4)) {
+                          fprintf(stdout,
+                            "decimating 192k sample rate to 96k\n");
+                          decimateFlag = 2;
+                          filterFlag   = 1;
+                          r = 2 * 96000;        // 192000
 			} else {
 			  decimateFlag = 1;
 			  filterFlag   = 0;
@@ -740,7 +757,6 @@ int usb_rcv_callback(airspyhf_transfer_t *context)
 	memcpy(&tmpFPBuf[0], p, 8*n);
 	if (filterFlag != 0) {
             int order =  12;
-	    iir_fbc(&tmpFPBuf[0], 2*n, order);
 	}
 	p = &tmpFPBuf[0];
         int    k        =  0;
@@ -749,8 +765,9 @@ int usb_rcv_callback(airspyhf_transfer_t *context)
             // gain is typically 64.0
             // should be 128.0 or 2X larger, so 1-bit missing
 
-/*
-// New rounding
+
+	if (sample_rounding == 1) {
+	    // New rounding
             float rnd0A = rand_float_co();
             float rnd0B = rand_float_co();
 
@@ -758,7 +775,17 @@ int usb_rcv_callback(airspyhf_transfer_t *context)
                 float x;
                 Float32_t x1;          // for debug hex print
                 x    = p[i];
-                float y = g8 * x;
+		float y = g8 * x;
+
+		//Bas ON5HB testing sample values
+                if (verbose){ 
+                        if (y > 127 || y < -128) { printf("Sample output values over 8bit - should not be many - reduce gain = %f\n", y);}
+                }
+
+		//8bit limiter Bas ON5HB
+		if (y > 127) y = 127;
+		else if ( y < -128) y = -128;
+
                 // add triangular noise
                 // for noise filtered rounding
                 float rnd1 = rand_float_co(); // noise with pdf [0..1)
@@ -774,18 +801,30 @@ int usb_rcv_callback(airspyhf_transfer_t *context)
                     rnd0B = rnd1;      // save for next iteration
                 }
               }
+	}
+	// end new rounding
+	else {
 
-// end new rounding
-*/
             // previous rounding
             for (int i=0; i<2*n; i++) {
                 float x = g8 * p[i];
                 int   k = (int)roundf(x);
+
+		//Bas ON5HB testing sample values
+                if (verbose){ 
+                        if (x > 127 || x < -128) { printf("Sample output values over 8bit - should not be many - reduce gain = %f\n", x);}
+		}
+
+		//8bit limiter Bas ON5HB
+		if (k > 127) k = 127;
+                else if ( k < -128) k = -128;
+
                 tmpBuf[i] = k + 128;  // 8-bit unsigned DC offset
             }
-            //end
+        }
 
             dataBuffer = (uint8_t *)(&tmpBuf[0]);
+
             sz = 2 * n;
         } else if (sampleBits == 16) {
             int16_t *tmp16ptr = (int16_t *)&tmpBuf[0];
@@ -818,200 +857,6 @@ int usb_rcv_callback(airspyhf_transfer_t *context)
     return(0);
 }
 
-
-//
-//
-
-typedef struct iirParams {
-    float 	a0;
-    float 	a1;
-    float 	a2;
-    float 	b0;
-    float 	b1;
-    float 	b2;
-    float 	ys_2L;	// saved history
-    float 	ys_1L;
-    float 	ys_0L;	// last output
-    float 	xs_2L;
-    float 	xs_1L;
-    float 	xs_0L;	// last input
-    float 	ys_2R;	// saved history
-    float 	ys_1R;
-    float 	ys_0R;	// last output
-    float 	xs_2R;
-    float 	xs_1R;
-    float 	xs_0R;	// last input
-    float	sr;
-    float	cf;
-    float	q;
-    int32_t 	ftype;
-} iirParams;
-
-void iir_f2(float *s, int n, iirParams *p) // IQ or stereo
-{
-    float	a0, a1, a2, b0, b1, b2;
-    float 	x2L,x1L,x0L,y2L,y1L,y0L;
-    float 	x2R,x1R,x0R,y2R,y1R,y0R;
-    int   	i, k;
-
-    a0 = p->a0 ;
-    a1 = p->a1 ;
-    a2 = p->a2 ;
-    b0 = p->b0 ;
-    b1 = p->b1 ;
-    b2 = p->b2 ;
-    k  = p->ftype;
-
-    x1L = p->xs_1L;			// recover history
-    x0L = p->xs_0L;
-    y1L = p->ys_1L;
-    y0L = p->ys_0L;
-    x1R = p->xs_1R;			// recover history
-    x0R = p->xs_0R;
-    y1R = p->ys_1R;
-    y0R = p->ys_0R;
-    if (k == 1) {			/* type 1 = lowpass  */
-      for (i=0; i<n; i+=2) { 		// +=2 for interleaved
-        x2L = s[i  ];
-	y2L = b0 * x2L + b1 * x1L + b2 * x0L - a1 * y1L - a2 * y0L;
-        s[i  ] = y2L;
-        y0L = y1L; y1L = y2L;
-        x0L = x1L; x1L = x2L;
-	//
-        x2R = s[i+1];
-	y2R = b0 * x2R + b1 * x1R + b2 * x0R - a1 * y1R - a2 * y0R;
-        s[i+1] = y2R;
-        y0R = y1R; y1R = y2R;
-        x0R = x1R; x1R = x2R;
-      }
-    }
-    p->xs_1L = x1L;		// save history
-    p->xs_0L = x0L;
-    p->ys_1L = y1L;
-    p->ys_0L = y0L;
-    p->xs_1R = x1R;		// save history
-    p->xs_0R = x0R;
-    p->ys_1R = y1R;
-    p->ys_0R = y0R;
-}
-
-void calc_iir_coefs(int ftype, float cf, float q, float sr, iirParams *p)
-{
-    double        w0, alpha;
-    double        b0,b1,b2,a0,a1,a2;
-    double	  g1, dbg;		// dB gain
-    double        y;
-
-    a0 = 0.0;
-    a1 = 0.0;
-    a2 = 0.0;
-    b0 = 0.0;
-    b1 = 0.0;
-    b2 = 0.0;
-    if (ftype == 3) {              // bandpass w/ 0 gain
-	dbg = 0.0;
-	g1 = sqrt(pow(10.0, (dbg / 20.0)));
-        w0 = 2.0 * 3.14159265358979 * cf / sr;
-	alpha = sin(w0)/(2.0 * q);
-	b0 =  alpha;
-	b1 =  0.0;
-	b2 = -alpha;
-	a0 =  1.0 + alpha;
-	a1 = -2.0 * cos(w0);
-	a2 =  1.0 - alpha;
-    } else if (ftype == 1) {  // lowpass
-	dbg = 0.0;
-	g1 = sqrt(pow(10.0, (dbg / 20.0)));
-        w0 = 2.0 * 3.14159265358979 * cf / sr;
-	alpha = sin(w0)/(2.0 * q);
-	if (ftype == 1) y = 1.0 - cos(w0);
-	else            y = 1.0 + cos(w0);
-	b0 =  y / 2.0;
-	b1 =  y;
-	b2 =  y / 2.0;
-	a0 =  1.0 + alpha;
-	a1 = -2.0 * cos(w0);
-	a2 =  1.0 - alpha;
-    }
-    p->a0 = a0;
-    p->a1 = a1/a0;
-    p->a2 = a2/a0;
-    p->b0 = b0/a0;
-    p->b1 = b1/a0;
-    p->b2 = b2/a0;
-    p->ys_1L =  0.0;
-    p->ys_0L =  0.0;
-    p->xs_1L =  0.0;
-    p->xs_0L =  0.0;
-    p->ys_1R =  0.0;
-    p->ys_0R =  0.0;
-    p->xs_1R =  0.0;
-    p->xs_0R =  0.0;
-    p->sr    =  sr;
-    p->cf    =  cf;
-    p->q     =  q;
-    p->ftype =  ftype;
-}
-
-// iir float biquad cascade
-// butterworth biquad cascade
-double bbcascade[36] = {
-  0.70710678, 0.0,0.0, 0.0,0.0,0.0,
-  0.54119610, 1.3065630, 0.0, 0.0,0.0,0.0,
-  0.51763809, 0.70710678, 1.9318517, 0.0,0.0,0.0,
-  0.50979558, 0.60134489, 0.89997622, 2.5629154, 0.0, 0.0,
-  0.50623256, 0.56116312, 0.70710678, 1.1013446, 3.1962266, 0.0,
-  0.50431448, 0.54119610, 0.63023621, 0.82133982, 1.3065630, 3.8306488
-};
-
-struct iirParams ipbc[36];
-
-void init_ipbc(double sr, double cf)
-{
-    int i,j;
-    for (j=0;j<6;j++) {
-       for (i=0;i<6;i++) {
-	  int ftype = 0;
-	  int k = 6*j + i;
-	  iirParams *p = &ipbc[k];
-	  float q = bbcascade[k];
-	  if (q > 0.0) { ftype = 1; }	// low pass
-	  calc_iir_coefs(ftype, cf, q, sr, p);
-       }
-    }
-}
-
-void iir_fbc(float *s, int n, int order)
-{
-    int num_biquads = order / 2;
-    int k = 0;
-    int batch = 4096; // 16384 fits in dcache
-    while (k < n) {
-        int m = batch;
-	if (k + batch > n) { m = n - k; }
-        for (int b=0;b<6;b++) {
-            int j = 6*(num_biquads-1) + b;
-            iirParams *p = &ipbc[j];
-            if (p->ftype == 1) {
-	        iir_f2(&s[k], m, p);
-            }
-        }
-	k += batch;
-    }
-}
-
-void init_iir()
-{
-    double        sr, bw;
-    sr =  192000.0;
-    bw =   16000.0;
-    	// int type = 1; // lowpass
-        // call calc_iir_coefs(type, bw, q, sr, &pp);
-        //   with 6 sets of 6 coeffs for 2nd to 12th order filtering
-    init_ipbc(sr, bw);
-        // int order =  12;		// set filter order
-        // iir_fbc(&uu[0], n, order);
-}
 
 /* eof */
 
