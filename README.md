@@ -76,7 +76,7 @@ The hfp\_tcp application is a single source file.  It can be built with the incl
 
 The following commands should be executed in a terminal window.  These commands will clone the hfp\_tcp repository into a local directory and will then build and install the executable:
 
-		git clone https://github.com/WB2ISS/hfp_tcp.git
+		git clone https://github.com/ON5HB/hfp_tcp.git
 		cd hfp_tcp
 		make
 		sudo make install
@@ -103,4 +103,4 @@ Settings have to be made within the source file, then compiled.
 Changed buffers, gains and ringbuffer to make it work with websdr.org servers.
 I'm testing with an Airspy HF Discovery.
 
-Readme.v19
+Readme.v20
