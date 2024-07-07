@@ -103,4 +103,7 @@ Settings have to be made within the source file, then compiled.
 Changed buffers, gains and ringbuffer to make it work with websdr.org servers.
 I'm testing with an Airspy HF Discovery.
 
-Readme.v20
+Best used with firmware version: R3.0.7-xx (beware check BB or CD version first!)
+Usable sample rates: 768kS/s 384kS/s 256kS/s 192kS/s (other rates will not work with websdr.org and 256k is not available after firmware 3.0.7!)
+
+Readme.v21
