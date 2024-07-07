@@ -5,7 +5,7 @@
 //    from an Airspy HF+
 //    on port 1234
 //
-#define VERSION "v.1.2.137"
+#define VERSION "v.1.2.139"
 //   v.1.2.130 2021-03-11  ON5HB Bas Heijermans - settings changed for websdr.org servers - testing with HF Discovery
 //   v.1.2.118 2020-12-31  1pm barry@medoff.com
 //   v.1.2.117 2020-09-02  rhn
@@ -31,7 +31,7 @@
 #define SAMPLE_BITS     (8)    // default to match rtl_tcp
 // #define SAMPLE_BITS  (16)    // default to match rsp_tcp
 //#define SAMPLE_BITS  (32)    // HF+ capable of float32 IQ data
-#define GAIN8           (2048.0)  // default gain (default: ?)
+#define GAIN8           (1024.0)  // default gain (default: ?)
 #define PORT            (1234)  // default port
 #define RING_BUFFER_ALLOCATION  (2L * 8L * 1024L * 1024L) // 16MB as memory is no issue on websdr.org system at ON5HB
 #define BUFFER_SIZE ( 64*1024 ) //can be very big too small ticking starts
@@ -85,7 +85,7 @@ uint8_t	   *ring_buffer_ptr     =  NULL;
 int		decimateFlag	=  1;
 int		decimateCntr	=  0;
 int		filterFlag	=  0;
-int             agc             =  2; // 0-off / 1-low / 2 high threshold
+int             agc             =  1; // 0-off / 1-low / 2 high threshold - low has better linearity
 int             attenuator      =  0; // Possible values: 0..8 Range: 0..48 dB Attenuation with 6 dB steps
 int             preamp          =  0; // 0 or 1: 1 to activate LNA (alias PreAmp): 1 = +6 dB gain - compensated in digital 
 int 		dsp 		=  1; /* Enables/Disables the IQ Correction, IF shift and Fine Tuning. */
@@ -110,8 +110,9 @@ void usage(void)
                 "version "VERSION
                 "\n\n Usage:\n"
                 "\t-p Listen port (default: 1234)\n"
-                "\t-r Gain (default: 2048 / value 0-8192? not tested)\n"
-		"\t-G Automatic-Gain-Control (default: 2 / 0-off / 1-low /  2-high threshold)\n"
+		"\t-s Samplerate (default: 192000)\n"
+                "\t-r Gain (default: 1024 / value 0-8192? not tested)\n"
+		"\t-G Automatic-Gain-Control (default: 1 / 0-off / 1-low /  2-high threshold)\n"
                 "\t-A Attenuator (default: 0 / values 0-8 each step is -6dB)\n"
                 "\t-L LNA* (default: off / on is +6dB)\n"
                 "\t-x Sample rounding* (default: New methode / Old way)\n\n"
@@ -132,7 +133,7 @@ int main(int argc, char *argv[]) {
 
 struct sigaction sigact, sigign;
 
-        while ((opt = getopt(argc, argv, "A:G:p:r:Lvxy")) != -1) {
+        while ((opt = getopt(argc, argv, "A:G:p:r:s:Lvxy")) != -1) {
                 switch (opt) {
                 case 'A':
                         attenuator = atoi(optarg);
@@ -149,6 +150,9 @@ struct sigaction sigact, sigign;
                         break;
                 case 'L':
                         preamp = 1;
+                        break;
+		case 's':
+                        sampRate = atoi(optarg);
                         break;
                 case 'v':
                         verbose = 1;
@@ -783,8 +787,8 @@ int usb_rcv_callback(airspyhf_transfer_t *context)
                 }
 
 		//8bit limiter Bas ON5HB
-		if (y > 127) y = 127;
-		else if ( y < -128) y = -128;
+		//if (y > 127) y = 127;
+		//else if ( y < -128) y = -128;
 
                 // add triangular noise
                 // for noise filtered rounding
